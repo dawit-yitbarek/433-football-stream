@@ -1,0 +1,16 @@
+# local dependencies
+node_modules/
+
+# Mock Data
+data/
+
+# local build and cache outputs
+.expo/
+.vscode/
+
+# local environment file
+.env
+
+# Native Directories
+android/
+ios/

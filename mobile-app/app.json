@@ -26,6 +26,8 @@
     },
     "plugins": [
       "expo-router",
+      "expo-font",
+      "expo-web-browser",
       [
         "expo-splash-screen",
         {
@@ -34,9 +36,15 @@
           "backgroundColor": "#0B0C10"
         }
       ],
-      "expo-font",
-      "expo-web-browser",
-      "expo-video"
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableSeparateBuildPerCPUArchitecture": true,
+            "enableProguardInReleaseBuilds": true
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
