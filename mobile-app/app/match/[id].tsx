@@ -4,6 +4,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { VideoRef } from 'react-native-video';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useMatches } from '@/context/MatchesContext';
+import { MaterialIcons } from '@expo/vector-icons';
 
 import VideoPlayer from '@/components/stream/VideoPlayer';
 import { ChannelSelector } from '@/components/stream/ChannelSelector';
@@ -34,14 +35,47 @@ export default function LiveMatchStreamScreen() {
 
   // Guard clause: no servers available
   if (!match.servers || match.servers.length === 0) {
+    const isUpcoming = match.match_status === 'vs';
+
     return (
-      <View className='flex-1 bg-void justify-center items-center gap-8 p-4'>
-        <Text className="text-muted text-lg text-center">No live streaming channels available for this game.</Text>
+      <View className='flex-1 bg-void justify-center items-center gap-6 p-6'>
+        {isUpcoming ? (
+          <>
+            <MaterialIcons
+              name='hourglass-top'
+              size={32}
+              className='text-cyan'
+            />
+            <Text className="text-white text-xl font-bold text-center mt-2">
+              Streaming Channels Loading
+            </Text>
+            <Text className="text-muted text-sm text-center px-4 leading-5">
+              Channels for this match are usually updated 30-60 minutes before kickoff.
+              Please check back closer to the start time!
+            </Text>
+          </>
+        ) : (
+          <>
+            <MaterialIcons
+              name='warning'
+              size={32}
+              className='text-red-500'
+            />
+            <Text className="text-white text-xl font-bold text-center mt-2">
+              Stream Temporarily unavailable
+            </Text>
+            <Text className="text-muted text-sm text-center px-4 leading-5">
+              We couldn't find broadcasting channel for this match.
+              Our system is constantly checking for alternatives.
+            </Text>
+          </>
+        )}
+
         <TouchableOpacity
-          className="bg-surface py-2.5 px-5 rounded border border-cyan"
+          className="bg-surface mt-4 py-3 px-6 rounded-lg border border-cyan active:opacity-70"
           onPress={() => router.replace('/')}
         >
-          <Text className="text-cyan font-bold text-sm">Back to Home</Text>
+          <Text className="text-cyan font-bold text-sm">Back to Dashboard</Text>
         </TouchableOpacity>
       </View>
     );

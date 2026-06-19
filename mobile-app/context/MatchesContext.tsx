@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, Dispatch, SetSta
 import { useRouter, useNavigationContainerRef } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { API_CONFIG, fetchWithRetry } from '@/config/api';
-import { validateMatchData } from '@/utils/validation';
+import { validateMatchData, setLiveStatus } from '@/utils/validation';
 
 // Define the type structure for a shared context state
 export interface matchData {
@@ -70,14 +70,17 @@ export const MatchesProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 throw new Error(`Server responded with status: ${response.status}`);
             }
 
-            const availableMatches = await response.json();
+            const availableMatches: matchData[] = await response.json();
 
             // Validate matches before setting state
             if (!Array.isArray(availableMatches)) {
                 throw new Error('Invalid response format: expected array');
             }
 
-            const validMatches = availableMatches.filter((match: any) => validateMatchData(match));
+            let validMatches: matchData[] = availableMatches.filter((match) => validateMatchData(match))
+
+            validMatches = validMatches.map((match) =>
+                ({ ...match, match_status: setLiveStatus(match.match_time) }));
 
             const uniqueLeagues = ['All'];
             validMatches.forEach((match: matchData) => {

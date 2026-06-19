@@ -4,7 +4,6 @@ import logger from '../config/logger.js';
 import { apiRotator } from './apiRotator.js';
 import { verifyStreamChannel } from '../utils/verifyStreamChannel.js';
 
-// Required leagues
 const ALLOWED_LEAGUES = [
     'Premier League',
     'LaLiga',
@@ -16,6 +15,7 @@ const ALLOWED_LEAGUES = [
 ].map(league => league.toLowerCase());
 
 export interface ApiMatch {
+    id?: string;
     match_time: number;
     match_status: 'live' | 'vs';
     home_team_name: string;
@@ -37,31 +37,14 @@ export interface ApiMatch {
 interface ApiResponseData {
     matches: ApiMatch[];
     pagination: {
-        page: number;
-        perPage: number;
-        total: number;
-        totalPages: number;
         hasNext: boolean;
-        hasPrev: boolean;
     };
 }
 
 class FootballService {
     public generateMatchId(homeTeam: string, awayTeam: string, timestamp: number): string {
         const uniqueString = `${homeTeam.trim().toLowerCase()}_vs_${awayTeam.trim().toLowerCase()}_${timestamp}`;
-
-        // Create an MD5 hash string
         return crypto.createHash('md5').update(uniqueString).digest('hex');
-    }
-
-    public setLiveStatus(matchTime: number): ("live" | "vs") {
-        const matchTimeMs = matchTime * 1000;
-        const currentTimeMs = Date.now();
-        if (matchTimeMs > currentTimeMs) {
-            return 'vs';
-        } else {
-            return 'live';
-        }
     }
 
     public async syncMatchesCache(): Promise<ApiMatch[]> {
@@ -69,7 +52,8 @@ class FootballService {
             let activeKey = await apiRotator.getNextKey();
             if (!activeKey) {
                 logger.error("🛑 Sync aborted: No available keys remaining.");
-                return [];
+                const existingCache = await redisClient.get('matches:today');
+                return existingCache ? JSON.parse(existingCache) : [];
             }
 
             const today = new Date();
@@ -78,7 +62,7 @@ class FootballService {
             let allMatches: ApiMatch[] = [];
             let page = 1;
             let hasMore = true;
-            let consecutiveErrors = 0; // Prevent infinite loops if all keys crash out on one page
+            let consecutiveErrors = 0;
 
             while (hasMore) {
                 if (consecutiveErrors >= apiRotator.getKeyCount()) {
@@ -94,24 +78,19 @@ class FootballService {
                         }
                     });
 
-
                     if (response.status === 429) {
                         logger.error(`🚫 Key hit 429 Rate Limit on page ${page}. Blacklisting and swapping...`);
-
                         await apiRotator.blacklistKey(activeKey);
                         activeKey = await apiRotator.getNextKey();
-
                         consecutiveErrors++;
-                        continue; // Re-run the while loop for the same page with the fresh key
+                        continue;
                     }
 
-                    if (!response.ok) {
-                        throw new Error(`API responded with status code: ${response.status}`);
-                    }
+                    if (!response.ok) throw new Error(`API responded with status code: ${response.status}`);
 
                     const data = await response.json() as ApiResponseData;
 
-                    if (data && data.matches) {
+                    if (data && data.matches && data.matches.length > 0) {
                         allMatches = [...allMatches, ...data.matches];
                         hasMore = data.pagination.hasNext;
                         page++;
@@ -121,32 +100,27 @@ class FootballService {
                     }
 
                 } catch (error: any) {
-                    logger.error(`Error fetching data on page ${page}: ${error}`);
-
-                    // Generic fallback error handling
+                    logger.error(`Error fetching data on page ${page}: ${error?.message || error}`);
                     activeKey = await apiRotator.getNextKey();
                     consecutiveErrors++;
-
-                    // 1 second cooldown delay to prevent immediate error spamming
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 }
             }
-            const totalPagesBurned = Math.max(1, page - 1);
-            await redisClient.set('api:metrics:page-weight', totalPagesBurned.toString());
 
-            // Filter matches by checking if their league is in allowed list
+            // Filter down to targeted leagues
             const allowedMatches = allMatches.filter((match) =>
                 ALLOWED_LEAGUES.includes(match.league_name.toLowerCase())
             );
 
             const filteredMatches: ApiMatch[] = allowedMatches.map((match) => ({
                 ...match,
-                id: this.generateMatchId(match.home_team_name, match.away_team_name, match.match_time),
-                match_status: this.setLiveStatus(match.match_time)
+                id: this.generateMatchId(match.home_team_name, match.away_team_name, match.match_time)
             }));
 
-            const matchesWithServers = filteredMatches.filter(match => match.servers.length > 0);
+            // Filter out matches without server arrays
+            const matchesWithServers = filteredMatches.filter(match => match.servers && match.servers.length > 0);
             const matchesWithValidServers: ApiMatch[] = [];
+            const matchesWithNoValidServers: ApiMatch[] = [];
 
             for (const match of matchesWithServers) {
                 const verifiedServers = await verifyStreamChannel(match.servers);
@@ -156,22 +130,26 @@ class FootballService {
                         ...match,
                         servers: verifiedServers
                     });
+                } else {
+                    matchesWithNoValidServers.push({
+                        ...match,
+                        servers: []
+                    });
                 }
             }
 
-            // Save the structured array back to Redis as a JSON string and Set to expire in 24 hours
+
+            // Save updated array to Redis
             await redisClient.set(
                 'matches:today',
-                JSON.stringify(matchesWithValidServers),
+                JSON.stringify([...matchesWithValidServers, ...matchesWithNoValidServers]),
                 { EX: 86400 }
             );
 
-            logger.info(`⚡ Cache Sync Complete: Parsed ${allMatches.length} games -> Retained ${matchesWithValidServers.length} target league games.`);
-            return matchesWithValidServers;
+            logger.info(`⚡ Flat Cache Sync Complete: Saved games ${matchesWithValidServers.length} with servers and ${matchesWithNoValidServers.length} without servers to Redis.`);
+            return [...matchesWithValidServers, ...matchesWithNoValidServers];
         } catch (error: any) {
             logger.error(`❌ Error during syncMatchesCache routine: ${error.message || error}`);
-
-            // Fallback: Return the data currently in the cache if available, otherwise return an empty array
             const existingCache = await redisClient.get('matches:today');
             return existingCache ? JSON.parse(existingCache) : [];
         }

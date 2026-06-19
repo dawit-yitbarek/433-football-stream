@@ -1,6 +1,4 @@
-/**
- * Input Validation and Safe Parsing Utilities
- */
+// Input Validation and Safe Parsing Utilities
 
 export interface ValidatedServer {
   name: string;
@@ -9,9 +7,7 @@ export interface ValidatedServer {
   header?: Record<string, string>;
 }
 
-/**
- * Validates and sanitizes server object
- */
+// Validates and sanitizes server object
 export function validateServer(server: any): ValidatedServer | null {
   if (!server || typeof server !== 'object') {
     console.warn('Invalid server object:', server);
@@ -55,9 +51,7 @@ export function validateServer(server: any): ValidatedServer | null {
   };
 }
 
-/**
- * Validates URL format
- */
+// Validates URL format
 function isValidUrl(urlString: string): boolean {
   try {
     new URL(urlString);
@@ -67,9 +61,7 @@ function isValidUrl(urlString: string): boolean {
   }
 }
 
-/**
- * Safely parses hex string to bytes
- */
+// Safely parses hex string to bytes
 export function safeHexToBase64(hexString: string): string | null {
   try {
     if (!hexString || typeof hexString !== 'string') {
@@ -99,9 +91,7 @@ export function safeHexToBase64(hexString: string): string | null {
   }
 }
 
-/**
- * Validates match data structure
- */
+// Validates match data structure
 export function validateMatchData(match: any): boolean {
   if (!match || typeof match !== 'object') return false;
 
@@ -109,9 +99,21 @@ export function validateMatchData(match: any): boolean {
   return requiredFields.every(field => field in match);
 }
 
-/**
- * Safely extracts and validates DRM parameters
- */
+// Set match status based on match time
+export function setLiveStatus(matchTime: number): ("live" | "vs") {
+  const matchTimeMs = matchTime * 1000;
+  const currentTimeMs = Date.now();
+
+  // If a match started less than 2.5 hours ago, flag it as live
+  const MATCH_WINDOW_MS = 2.5 * 60 * 60 * 1000;
+
+  if (currentTimeMs >= matchTimeMs && currentTimeMs <= (matchTimeMs + MATCH_WINDOW_MS)) {
+    return 'live';
+  }
+  return 'vs';
+}
+
+// Safely extracts and validates DRM parameters
 export function parseDrmUrl(url: string): { url: string; licenseKey: string | null } | null {
   try {
     if (!url.includes('|')) {
