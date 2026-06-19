@@ -6,8 +6,6 @@ on:
       - "prod-*"
       - "preview-*"
       - "dev-*"
-
-  # THIS ALOWS MANUAL RUNS VIA THE GITHUB UI
   workflow_dispatch:
     inputs:
       forced_profile:
@@ -23,26 +21,30 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./mobile-app
 
     steps:
-      # Step 1: A tag pushes & we check out the full git history
+      # Step 1: Run at root to fetch entire project history cleanly
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Essential to trace back through past commits
+          fetch-depth: 0 
 
-      # Step 2: Directly grab the last commit that altered the 'mobile-app' folder
+      # Step 2: Run at root to successfully resolve monorepo subdirectory paths
       - name: Resolve Target Mobile Commit
         id: resolve-commit
         run: |
           echo "Finding last commit that altered mobile-app/..."
-          LAST_MOBILE_COMMIT=$(git log -n 1 --max-count=1 --format="%H" -- mobile-app/)
+          LAST_MOBILE_COMMIT=$(git log -n 1 --max-count=1 --format="%H" -- mobile-app/ || echo "")
+          
+          if [ -z "$LAST_MOBILE_COMMIT" ]; then
+            echo "⚠️ Warning: Git log couldn't resolve mobile-app history. Falling back to HEAD."
+            LAST_MOBILE_COMMIT=$(git rev-parse HEAD)
+          fi
+          
+          echo "Resolved Target Commit SHA: $LAST_MOBILE_COMMIT"
           echo "TARGET_SHA=$LAST_MOBILE_COMMIT" >> $GITHUB_ENV
 
-      # Step 3: Check the profile attached with the tag or manual input
+      # Step 3: Run at root to process strings safely
       - name: Determine EAS Profile
         id: info
         run: |
@@ -56,12 +58,11 @@ jobs:
           elif [[ "$TAG_NAME" == dev-* ]]; then
             echo "PROFILE=development" >> $GITHUB_ENV
           else
-            # Fallback to the manual dropdown input if it wasn't triggered by a tag
             echo "PROFILE=${{ github.event.inputs.forced_profile }}" >> $GITHUB_ENV
           fi
           echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
 
-      # Standard Expo Setup
+      # Standard Expo Setup (Node configuration requires path to lockfile)
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -75,12 +76,13 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      # Step 4: Check if there was already a build with this profile for that target commit
+      # Step 4: Run at root so EAS CLI reads global workspace parameters safely
       - name: Validate Against Duplicate Builds
         run: |
           echo "Checking Expo history for Profile: ${{ env.PROFILE }} at Commit: ${{ env.TARGET_SHA }}"
-
-          # Query Expo for recent builds matching this profile
+          
+          # Move inside to ensure EAS finds the app project context before scanning
+          cd mobile-app
           EXISTING_BUILD=$(eas build:list --platform android --profile ${{ env.PROFILE }} --limit 15 --json | grep "${{ env.TARGET_SHA }}" || true)
 
           if [ -n "$EXISTING_BUILD" ]; then
@@ -89,18 +91,16 @@ jobs:
           fi
           echo "✅ No prior build found for this mobile state. Safe to proceed."
 
-      # Step 5: Trigger the build for the provided profile
+      # Step 5: Scoped directly to mobile app dependency directory
       - name: Install dependencies
+        working-directory: ./mobile-app
         run: npm install
 
+      # Step 6: Full repository rollback followed by sub-directory execution
       - name: Build Android via EAS
-        # Override the default working directory back to root ($GITHUB_WORKSPACE)
-        # so the entire repository reverts back to the target commit state cleanly.
-        working-directory: ${{ github.workspace }}
         run: |
           echo "Switching entire repository state to target commit: ${{ env.TARGET_SHA }}"
           git checkout ${{ env.TARGET_SHA }}
 
-          # Move into the mobile folder to execute the EAS command
           cd mobile-app
           eas build --platform android --profile ${{ env.PROFILE }} --message "Triggered by Tag: ${{ github.ref_name }} (Code State: ${{ env.SHORT_SHA }})" --non-interactive
